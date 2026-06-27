@@ -1,23 +1,8 @@
 <div align="center">
 
-```
-       █▄      ▄█
-        ██    ██
-      ▄▄██▄▄▄▄██▄▄
-  ▄█▀▄████████████▄▀█▄
-  ▀  ██████████████
-     ██████████████
-      ████████████
-       ██████████      ▄████▄
-        ▀██████▀       ██████
-          ▀▀▀▀       ▄██████
-                    ▄██████▀
-                    ▀█████▀
-                     ███▀▀
-                      ▀
-```
+<img src="docs/mascot.png" alt="MGE_GOAT mascot — an evil goat licking a crying, melting ice cream" width="260">
 
-<sub>↑ static silhouette — in the TUI this is a truecolor pixel sprite that blinks, bobs, licks and melts</sub>
+<sub>in the TUI this pixel sprite animates in truecolor — blinks, bobs, licks & melts</sub>
 
 # 🐐🍦 MGE_GOAT
 
