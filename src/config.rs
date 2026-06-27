@@ -48,10 +48,12 @@ pub struct ProviderConfig {
     /// tool-calling (OpenAI, Anthropic, GitHub Models gpt-4.1) to harden them.
     ///
     /// SECURITY: when on, a model that quotes untrusted content containing
-    /// `<function=bash>` markup could have it parsed as a real call. This is bounded
-    /// by (a) the known-tool-name filter, (b) the `bash`/`delegate` approval prompt in
-    /// the TUI, and (c) the fact that text parsing only runs when the model returned
-    /// NO structured call — so native-tool models never hit this path even when on.
+    /// `<function=…>` markup could have it parsed as a real call. Bounded by (a) the
+    /// known-tool-name filter and (b) text parsing only firing when the model returned
+    /// NO structured call (so native-tool models never hit this path). NOTE: the
+    /// `bash`/`delegate` approval prompt covers only MUTATING tools — a prompt-injected
+    /// `read_file`/`web_fetch` auto-allows in `default`/`acceptEdits` mode (web_fetch
+    /// still SSRF-guarded). Use `plan` mode, or set this `false`, on untrusted repos.
     #[serde(default)]
     pub text_tool_calls: Option<bool>,
 }
@@ -698,9 +700,9 @@ provider = "openrouter"
 model = "openai/gpt-oss-120b:free"
 fallback = ["local"]
 
-[models.fast]            # light/cheap tasks
-provider = "openrouter"
-model = "nvidia/nemotron-nano-9b-v2:free"
+[models.fast]            # light tasks — gpt-4.1-mini is free, fast & native
+provider = "github"
+model = "openai/gpt-4.1-mini"
 fallback = ["main", "local"]
 
 [models.local]           # ultimate fallback — run `llama-server` (docs/LOCAL_LLAMA.md)
@@ -836,6 +838,8 @@ mod tests {
         let cfg: Config = toml::from_str(STARTER_TOML).expect("STARTER_TOML must parse");
         assert!(!cfg.providers["openai"].parses_text_tool_calls());
         assert!(!cfg.providers["anthropic"].parses_text_tool_calls());
+        // github carries all the default traffic — its hardening must not regress.
+        assert!(!cfg.providers["github"].parses_text_tool_calls());
         // …while the open-model providers keep text parsing on (so they can act).
         assert!(cfg.providers["nim"].parses_text_tool_calls());
         assert!(cfg.providers["openrouter"].parses_text_tool_calls());
@@ -858,7 +862,14 @@ mod tests {
         ] {
             assert!(cfg.models.contains_key(r), "missing route {r}");
         }
-        for p in ["openrouter", "nim", "openai", "anthropic", "local"] {
+        for p in [
+            "openrouter",
+            "nim",
+            "openai",
+            "anthropic",
+            "github",
+            "local",
+        ] {
             assert!(cfg.providers.contains_key(p), "missing provider {p}");
         }
         // The cascade must terminate at local.
