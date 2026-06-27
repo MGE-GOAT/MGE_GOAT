@@ -674,14 +674,16 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires rust-analyzer + run from the mge repo root"]
     async fn find_references_resolves_real_symbol() {
-        let mut cfg = crate::config::Config::default();
-        cfg.lsp = crate::config::LspConfig {
-            enabled: true,
-            timeout_secs: 90,
-            servers: std::collections::BTreeMap::from([(
-                "rs".to_string(),
-                vec!["rust-analyzer".to_string()],
-            )]),
+        let cfg = crate::config::Config {
+            lsp: crate::config::LspConfig {
+                enabled: true,
+                timeout_secs: 90,
+                servers: std::collections::BTreeMap::from([(
+                    "rs".to_string(),
+                    vec!["rust-analyzer".to_string()],
+                )]),
+            },
+            ..Default::default()
         };
         let routing = std::path::Path::new("src/routing.rs");
         let content = std::fs::read_to_string(routing).unwrap();

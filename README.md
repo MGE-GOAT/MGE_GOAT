@@ -19,6 +19,7 @@
 
 **A free, open-source, GPU-aware agentic coding CLI in the spirit of Claude Code — built to run on open models.**
 
+[![CI](https://github.com/MGE-GOAT/MGE_GOAT/actions/workflows/ci.yml/badge.svg)](https://github.com/MGE-GOAT/MGE_GOAT/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-edition_2024-orange.svg)](https://www.rust-lang.org/)
 [![TUI: ratatui](https://img.shields.io/badge/TUI-ratatui-blueviolet.svg)](https://ratatui.rs/)

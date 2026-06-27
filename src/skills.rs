@@ -173,26 +173,6 @@ pub(crate) fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
     Some((front, body))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn splits_frontmatter_and_body() {
-        let md = "---\nname: foo\ndescription: does foo\n---\n# Body\nstep one $ARGUMENTS\n";
-        let (front, body) = split_frontmatter(md).expect("frontmatter");
-        assert!(front.contains("name: foo"));
-        assert!(front.contains("description: does foo"));
-        assert!(body.trim_start().starts_with("# Body"));
-        assert!(body.contains("$ARGUMENTS"));
-    }
-
-    #[test]
-    fn no_frontmatter_returns_none() {
-        assert!(split_frontmatter("# just a heading\n").is_none());
-    }
-}
-
 struct UseSkill {
     skills: Arc<Vec<Skill>>,
 }
@@ -234,5 +214,25 @@ impl Tool for UseSkill {
                     .join(", ")
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn splits_frontmatter_and_body() {
+        let md = "---\nname: foo\ndescription: does foo\n---\n# Body\nstep one $ARGUMENTS\n";
+        let (front, body) = split_frontmatter(md).expect("frontmatter");
+        assert!(front.contains("name: foo"));
+        assert!(front.contains("description: does foo"));
+        assert!(body.trim_start().starts_with("# Body"));
+        assert!(body.contains("$ARGUMENTS"));
+    }
+
+    #[test]
+    fn no_frontmatter_returns_none() {
+        assert!(split_frontmatter("# just a heading\n").is_none());
     }
 }
