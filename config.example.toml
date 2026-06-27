@@ -1,0 +1,191 @@
+# MGE_GOAT configuration — full example 🐐🍦
+#
+# `mge init` writes a minimal starter; this file is a richer reference showing
+# every section. Copy what you need to ~/.config/mge/config.toml.
+#
+# SECRETS ARE NEVER STORED HERE. Each provider names an env var (api_key_env);
+# put the actual keys in ~/.config/mge/secrets.env (chmod 600), e.g.
+#   export OPENROUTER_API_KEY=...
+#   export GITHUB_TOKEN=...
+
+default_route = "main"
+auto_route = true   # pick fast/main/heavy per task automatically
+
+# ── Providers (all OpenAI-compatible) ─────────────────────────────────────────
+[providers.github]                           # GitHub Models — FREE tier, GitHub PAT
+kind = "openai"
+base_url = "https://models.github.ai/inference"
+api_key_env = "GITHUB_TOKEN"
+text_tool_calls = false   # gpt-4.1 family does native structured tool-calling
+
+[providers.openrouter]
+kind = "openai"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+
+[providers.nim]
+kind = "openai"
+base_url = "https://integrate.api.nvidia.com/v1"
+api_key_env = "NVIDIA_NIM_API_KEY"
+
+[providers.hf]                               # Hugging Face Inference Providers (free tier)
+kind = "openai"
+base_url = "https://router.huggingface.co/v1"
+api_key_env = "HF_TOKEN"
+
+[providers.openai]
+kind = "openai"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+text_tool_calls = false   # OpenAI does native structured tool-calling
+
+[providers.anthropic]
+kind = "openai"
+base_url = "https://api.anthropic.com/v1"    # Anthropic's OpenAI-compat endpoint
+api_key_env = "ANTHROPIC_API_KEY"
+text_tool_calls = false   # Claude does native structured tool-calling
+
+[providers.local]
+kind = "openai"
+# Local runtime — ollama (`ollama serve`, e.g. `ollama pull qwen2.5-coder:3b`)
+# on :11434, or llama.cpp (`llama-server -m <model.gguf>`) on :8080.
+base_url = "http://localhost:11434/v1"
+api_key_env = "NONE"
+local = true             # `text_tool_calls` defaults to true for local models
+
+# ── Model routes — free-first AUTO-CASCADE ────────────────────────────────────
+# Every route falls back (429 / 5xx / timeout / unavailable / no-credit) down its
+# chain, ending at `local`. Missing-key routes are skipped automatically.
+#
+# PRIMARY = GitHub Models gpt-4.1 (FREE with a GitHub PAT) — reliable NATIVE
+# tool-calling, so the agent loop just works. NIM/OpenRouter open models (Qwen/
+# gpt-oss) are capable but speak tools as TEXT; kept as fallbacks. Switch any time
+# in the TUI with `/model <id>`.
+
+[models.main]            # primary coding loop — free + native tool-calling
+provider = "github"
+model = "openai/gpt-4.1-mini"
+fallback = ["main_nim", "hf", "main_free", "local"]
+
+[models.main_nim]        # NIM Qwen — capable, no daily wall (text-format tool calls)
+provider = "nim"
+model = "qwen/qwen3.5-122b-a10b"
+fallback = ["hf", "main_free", "local"]
+
+[models.main_free]       # OpenRouter free (rate-limited)
+provider = "openrouter"
+model = "qwen/qwen3-coder:free"
+fallback = ["local"]
+
+[models.agent]           # subagents — free + native first
+provider = "github"
+model = "openai/gpt-4.1-mini"
+fallback = ["agent_nim", "agent_free", "local"]
+
+[models.agent_nim]
+provider = "nim"
+model = "moonshotai/kimi-k2.6"
+fallback = ["agent_free", "local"]
+
+[models.agent_free]
+provider = "openrouter"
+model = "openai/gpt-oss-120b:free"
+fallback = ["local"]
+
+[models.heavy]           # reasoning-heavy tier — stronger free native model
+provider = "github"
+model = "openai/gpt-4.1"
+fallback = ["heavy_nim", "heavy_free", "local"]
+
+[models.heavy_nim]
+provider = "nim"
+model = "moonshotai/kimi-k2.6"
+fallback = ["heavy_free", "local"]
+
+[models.heavy_free]
+provider = "openrouter"
+model = "openai/gpt-oss-120b:free"
+fallback = ["local"]
+
+[models.fast]            # light tasks — gpt-4.1-mini is free, fast & native
+provider = "github"
+model = "openai/gpt-4.1-mini"
+fallback = ["main", "local"]
+
+[models.local]           # offline fallback — local ollama / llama.cpp on your GPU
+provider = "local"
+model = "qwen2.5-coder:3b"
+min_free_vram_mb = 3000  # GPU gate: only prefer local if this much VRAM is free
+
+# Premium / extra named routes — switch with `/model <name>` -------------------
+[models.openai]          # add OPENAI_API_KEY, then `/model openai`
+provider = "openai"
+model = "gpt-4o-mini"
+fallback = ["main"]
+
+[models.claude]          # add ANTHROPIC_API_KEY, then `/model claude`
+provider = "anthropic"
+model = "claude-3-5-sonnet-20241022"
+fallback = ["main"]
+
+[models.hf]              # Hugging Face free tier — 32B coding model
+provider = "hf"
+model = "Qwen/Qwen2.5-Coder-32B-Instruct"
+fallback = ["local"]
+
+# Multimodal: `@image.png` / `@audio.mp3` in chat auto-route here ---------------
+[models.vision]
+provider = "nim"
+model = "meta/llama-3.2-11b-vision-instruct"
+fallback = ["vision_free"]
+
+[models.vision_free]
+provider = "openrouter"
+model = "nvidia/nemotron-nano-12b-v2-vl:free"
+
+[models.audio]           # NOTE: audio INPUT is not free — OpenRouter needs balance
+provider = "openrouter"
+model = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+
+# ── MCP servers (their tools appear as mcp__<server>__<tool>) ──────────────────
+[mcp]
+enabled = true
+
+# Example: the filesystem MCP server (npx fetches it on first run).
+[mcp.servers.filesystem]
+transport = "stdio"               # or "http" with a `url`
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
+sandbox = "process"               # off | process (NO_NEW_PRIVS) | bwrap
+tools_allow = ["read_", "list_"]  # optional: only expose these tool prefixes
+enabled = false                   # flip on when you want its tools in the agent
+
+# ── External agents — delegate to your Codex / Claude Code subscriptions ───────
+[agents.codex]
+command = "codex"
+args = ["exec", "--skip-git-repo-check"]
+description = "OpenAI Codex (ChatGPT subscription)"
+
+[agents.claude]
+command = "claude"
+args = ["-p"]
+description = "Claude Code (Claude subscription)"
+
+# ── Optional: semantic search (embeddings) ────────────────────────────────────
+# Embeds the codebase to find files by MEANING. Lexical search (grep/find_symbol/
+# code_graph) works without this; set enabled=false to disable.
+[rag]
+enabled = true
+endpoint = "https://models.github.ai/inference"
+model = "openai/text-embedding-3-small"
+api_key_env = "GITHUB_TOKEN"
+
+# ── Optional: LSP (ground-truth diagnostics + precise references) ─────────────
+[lsp]
+enabled = true
+timeout_secs = 60
+[lsp.servers]
+rs = ["rust-analyzer"]
+# py = ["pyright-langserver", "--stdio"]
+# ts = ["typescript-language-server", "--stdio"]
+# go = ["gopls"]

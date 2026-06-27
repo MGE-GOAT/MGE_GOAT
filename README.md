@@ -295,7 +295,8 @@ The TUI is the main way in, but every capability is also a command for pipes/CI/
 
 Config: `~/.config/mge/config.toml` · Secrets: `~/.config/mge/secrets.env`
 (env-var values, never stored in the TOML). `mge init` writes a fully-commented
-starter. The essentials:
+starter; **[`config.example.toml`](config.example.toml)** is a richer reference
+with every section filled in. The essentials:
 
 ```toml
 default_route = "main"
