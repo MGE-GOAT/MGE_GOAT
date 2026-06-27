@@ -513,6 +513,9 @@ impl Agent {
             let mut req = base.clone();
             req.model = cand.model.clone();
             req.max_tokens = cand.max_tokens;
+            // Open models that emit tool calls as text need their history rendered
+            // back as text too, or they loop re-issuing the same call.
+            req.text_tool_calls = cand.text_tool_calls;
 
             // Phase 1: connect.
             let mut stream = match cand.provider.stream_chat(req).await {

@@ -110,6 +110,12 @@ pub struct ChatRequest {
     /// Reasoning-effort hint (`low|medium|high|xhigh`). Passed through to providers
     /// that honor it (gpt-oss, o-series); silently ignored by those that don't.
     pub reasoning_effort: Option<String>,
+    /// Render the conversation in the TEXT tool-call format (Hermes
+    /// `<tool_call>`/`<tool_response>`) instead of structured `tool_calls`/`tool`
+    /// messages. Set for providers serving open models that speak tools as text —
+    /// feeding their own prior calls/results back as structured fields makes them
+    /// loop. See `text_native_wire` in `openai_compat`.
+    pub text_tool_calls: bool,
 }
 
 impl ChatRequest {
@@ -121,6 +127,7 @@ impl ChatRequest {
             temperature: None,
             max_tokens: None,
             reasoning_effort: None,
+            text_tool_calls: false,
         }
     }
     pub fn with_tools(mut self, tools: Vec<ToolDef>) -> Self {

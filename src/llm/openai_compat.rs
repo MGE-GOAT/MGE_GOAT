@@ -118,6 +118,51 @@ fn message_to_wire(m: &Message) -> WireMessage {
     }
 }
 
+/// Render one tool call as Hermes-style text: `<tool_call>{"name":..,"arguments":..}</tool_call>`.
+fn render_tool_call_text(tc: &super::ToolCall) -> String {
+    let args: Value =
+        serde_json::from_str(&tc.arguments).unwrap_or_else(|_| Value::String(tc.arguments.clone()));
+    let obj = json!({ "name": tc.name, "arguments": args });
+    format!(
+        "<tool_call>\n{}\n</tool_call>",
+        serde_json::to_string(&obj).unwrap_or_default()
+    )
+}
+
+/// Text-native wire form: render assistant tool calls and tool results AS TEXT
+/// (Hermes `<tool_call>`/`<tool_response>`) instead of structured `tool_calls`/
+/// `tool`-role messages. Open models that emit tool calls as text were trained on
+/// this conversation shape; feeding their own calls back as structured fields makes
+/// them fail to "see" the result and loop re-issuing the call.
+fn message_to_wire_text(m: &Message) -> WireMessage {
+    match m.role {
+        Role::Assistant if !m.tool_calls.is_empty() => {
+            let mut content = m.content.clone();
+            for tc in &m.tool_calls {
+                if !content.is_empty() {
+                    content.push('\n');
+                }
+                content.push_str(&render_tool_call_text(tc));
+            }
+            WireMessage {
+                role: "assistant",
+                content: Value::String(content),
+                tool_calls: None,
+                tool_call_id: None,
+            }
+        }
+        // Tool result → a user turn carrying `<tool_response>…</tool_response>`.
+        Role::Tool => WireMessage {
+            role: "user",
+            content: Value::String(format!("<tool_response>\n{}\n</tool_response>", m.content)),
+            tool_calls: None,
+            tool_call_id: None,
+        },
+        // system / user / assistant-without-calls: unchanged (keeps media handling).
+        _ => message_to_wire(m),
+    }
+}
+
 fn tool_to_wire(t: &ToolDef) -> Value {
     json!({
         "type": "function",
@@ -129,8 +174,16 @@ fn tool_to_wire(t: &ToolDef) -> Value {
     })
 }
 
+/// Default output-token budget when a route doesn't set one — generous enough to
+/// write a sizable file in a single tool call without the provider truncating it.
+const DEFAULT_MAX_TOKENS: u32 = 8192;
+
 fn build_body(req: &ChatRequest) -> Value {
-    let messages: Vec<WireMessage> = req.messages.iter().map(message_to_wire).collect();
+    let messages: Vec<WireMessage> = if req.text_tool_calls {
+        req.messages.iter().map(message_to_wire_text).collect()
+    } else {
+        req.messages.iter().map(message_to_wire).collect()
+    };
     let mut body = json!({
         "model": req.model,
         "messages": messages,
@@ -142,9 +195,10 @@ fn build_body(req: &ChatRequest) -> Value {
     if let Some(t) = req.temperature {
         body["temperature"] = json!(t);
     }
-    if let Some(m) = req.max_tokens {
-        body["max_tokens"] = json!(m);
-    }
+    // Always send a generous max_tokens: some providers default to a tiny output
+    // budget (a few hundred tokens) and truncate a file-writing tool call
+    // mid-content, leaving an unparseable call. A route may override via `max_tokens`.
+    body["max_tokens"] = json!(req.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS));
     if let Some(e) = &req.reasoning_effort {
         body["reasoning_effort"] = json!(e);
     }
@@ -307,5 +361,68 @@ impl LlmProvider for OpenAiCompat {
         });
 
         Ok(mapped.boxed())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::{Message, Role, ToolCall};
+
+    fn convo() -> Vec<Message> {
+        vec![
+            Message::user("write hello.py"),
+            Message {
+                role: Role::Assistant,
+                content: "I'll write it.".into(),
+                tool_calls: vec![ToolCall {
+                    id: "c1".into(),
+                    name: "write_file".into(),
+                    arguments: r#"{"path":"hello.py","content":"print(1)"}"#.into(),
+                }],
+                tool_call_id: None,
+                media: vec![],
+            },
+            Message::tool_result("c1", "wrote 1 line to hello.py"),
+        ]
+    }
+
+    #[test]
+    fn structured_mode_uses_tool_calls_and_tool_role() {
+        let mut req = ChatRequest::new("m", convo());
+        req.text_tool_calls = false;
+        let body = build_body(&req);
+        let msgs = body["messages"].as_array().unwrap();
+        // assistant keeps a structured tool_calls field; tool result keeps tool role.
+        assert!(msgs[1].get("tool_calls").is_some());
+        assert_eq!(msgs[2]["role"], "tool");
+    }
+
+    #[test]
+    fn text_native_renders_calls_and_results_as_text() {
+        let mut req = ChatRequest::new("m", convo());
+        req.text_tool_calls = true;
+        let body = build_body(&req);
+        let msgs = body["messages"].as_array().unwrap();
+        // No structured tool_calls / tool role anywhere — it's all text.
+        assert!(msgs.iter().all(|m| m.get("tool_calls").is_none()));
+        assert!(msgs.iter().all(|m| m["role"] != "tool"));
+        // The assistant call is rendered as <tool_call> Hermes text…
+        let asst = msgs[1]["content"].as_str().unwrap();
+        assert!(asst.contains("<tool_call>") && asst.contains("\"name\":\"write_file\""));
+        // …and the result comes back as a user <tool_response> turn.
+        assert_eq!(msgs[2]["role"], "user");
+        assert!(
+            msgs[2]["content"]
+                .as_str()
+                .unwrap()
+                .contains("<tool_response>")
+        );
+        assert!(
+            msgs[2]["content"]
+                .as_str()
+                .unwrap()
+                .contains("wrote 1 line")
+        );
     }
 }
