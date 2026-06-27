@@ -1,5 +1,11 @@
 # MGE_GOAT — Capability Gap Matrix (vs Claude Code, Codex, and the field)
 
+> ⚠️ **Historical planning snapshot (2026-06).** This was the pre-build research
+> matrix. Many items marked ❌/🎯 here are now **implemented** — including
+> web_search, subagents/swarm, plan mode, reasoning effort, auto-compaction,
+> session resume/fork, repo map, and goal loops. For the current, accurate feature
+> set see the [README](../README.md). Kept for design context, not as a status board.
+
 Researched 2026-06 against live docs for **Claude Code**, **OpenAI Codex CLI**, and 12+ others
 (Aider, Cline, Roo, Cursor, Windsurf/Cascade, Gemini CLI, Qwen Code, Goose, Amp, opencode, Crush, OpenHands, Devin).
 
