@@ -40,21 +40,27 @@ pub struct ProviderConfig {
     /// local GPU should not be used for parallel subagents).
     #[serde(default)]
     pub local: bool,
-    /// Whether tool calls must be parsed from the model's TEXT (Qwen/Hermes style)
-    /// because this provider lacks NATIVE structured tool-calling. Defaults to
-    /// `local` (llama.cpp/ollama serve text-only models; cloud APIs return
-    /// structured calls). SECURITY: text parsing on a model that quotes untrusted
-    /// content lets injected `<function=bash>` markup execute — enable only when the
-    /// model genuinely needs it.
+    /// Whether to parse tool calls from the model's TEXT (Qwen/Hermes style).
+    /// **Defaults to `true`**, because the open models this tool targets (Qwen,
+    /// gpt-oss, etc., on llama.cpp / NIM / OpenRouter / HF) emit tool calls as text
+    /// rather than the native structured field — without text parsing they can't act
+    /// as agents at all. Set `false` for providers whose models DO native structured
+    /// tool-calling (OpenAI, Anthropic, GitHub Models gpt-4.1) to harden them.
+    ///
+    /// SECURITY: when on, a model that quotes untrusted content containing
+    /// `<function=bash>` markup could have it parsed as a real call. This is bounded
+    /// by (a) the known-tool-name filter, (b) the `bash`/`delegate` approval prompt in
+    /// the TUI, and (c) the fact that text parsing only runs when the model returned
+    /// NO structured call — so native-tool models never hit this path even when on.
     #[serde(default)]
     pub text_tool_calls: Option<bool>,
 }
 
 impl ProviderConfig {
-    /// Whether to parse tool calls from model text (defaults to `local` — local
-    /// runtimes serve text-only models; cloud APIs return structured calls).
+    /// Whether to parse tool calls from model text. Defaults to `true` — see the
+    /// field docs (open models require it; set `false` per native-tool provider).
     pub fn parses_text_tool_calls(&self) -> bool {
-        self.text_tool_calls.unwrap_or(self.local)
+        self.text_tool_calls.unwrap_or(true)
     }
 
     /// Resolve the API key from the environment, if this provider needs one.
@@ -606,15 +612,27 @@ kind = "openai"
 base_url = "https://integrate.api.nvidia.com/v1"
 api_key_env = "NVIDIA_NIM_API_KEY"
 
+# text_tool_calls defaults to TRUE so open models (Qwen/gpt-oss on NIM/OpenRouter/
+# HF/local) — which emit tool calls as text — can actually use tools. Native-tool
+# providers below set it FALSE to harden against prose-injected tool markup; they
+# return structured calls anyway, so they never need text parsing.
 [providers.openai]
 kind = "openai"
 base_url = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
+text_tool_calls = false   # OpenAI does native structured tool-calling
 
 [providers.anthropic]
 kind = "openai"
 base_url = "https://api.anthropic.com/v1"   # Anthropic's OpenAI-compat endpoint
 api_key_env = "ANTHROPIC_API_KEY"
+text_tool_calls = false   # Claude does native structured tool-calling
+
+[providers.github]                           # GitHub Models — FREE tier, just a GitHub PAT
+kind = "openai"
+base_url = "https://models.github.ai/inference"
+api_key_env = "GITHUB_TOKEN"
+text_tool_calls = false   # gpt-4.1 family does native structured tool-calling
 
 [providers.local]
 kind = "openai"
@@ -628,18 +646,34 @@ local = true
 # missing are skipped automatically (so openai/claude idle until you add a key).
 # Switch live in the TUI with `/model <id>`; list ids with `mge models`. Model
 # ids drift over time, but the cascade self-heals past a stale one.
+#
+# PRIMARY = GitHub Models gpt-4.1 (FREE with a GitHub PAT) because it has reliable
+# NATIVE tool-calling — the agent's tool loop just works. NIM/OpenRouter open
+# models (Qwen/gpt-oss) are capable but speak tool calls as TEXT, which is less
+# reliable; they're kept as fallbacks. No GitHub token? Set GITHUB_TOKEN via
+# `mge setup`, or the cascade drops to NIM/OpenRouter/local automatically.
 
-[models.main]            # primary loop — NIM (no daily wall) → free → local
+[models.main]            # primary coding loop — free + native tool-calling
+provider = "github"
+model = "openai/gpt-4.1-mini"
+fallback = ["main_nim", "main_free", "local"]
+
+[models.main_nim]        # NIM Qwen — capable, no daily wall (text-format tool calls)
 provider = "nim"
 model = "qwen/qwen3.5-122b-a10b"
 fallback = ["main_free", "local"]
 
-[models.main_free]
+[models.main_free]       # OpenRouter free
 provider = "openrouter"
 model = "qwen/qwen3-coder:free"
 fallback = ["local"]
 
-[models.agent]           # subagents
+[models.agent]           # subagents — free + native first
+provider = "github"
+model = "openai/gpt-4.1-mini"
+fallback = ["agent_nim", "agent_free", "local"]
+
+[models.agent_nim]
 provider = "nim"
 model = "moonshotai/kimi-k2.6"
 fallback = ["agent_free", "local"]
@@ -649,7 +683,12 @@ provider = "openrouter"
 model = "openai/gpt-oss-120b:free"
 fallback = ["local"]
 
-[models.heavy]           # reasoning-heavy tier
+[models.heavy]           # reasoning-heavy tier — stronger free native model
+provider = "github"
+model = "openai/gpt-4.1"
+fallback = ["heavy_nim", "heavy_free", "local"]
+
+[models.heavy_nim]
 provider = "nim"
 model = "moonshotai/kimi-k2.6"
 fallback = ["heavy_free", "local"]
@@ -775,6 +814,32 @@ model = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_tool_calls_defaults_on_and_starter_hardens_native() {
+        // Default ON so open models (which emit tool calls as text) can use tools.
+        let p = ProviderConfig {
+            kind: ProviderKind::Openai,
+            base_url: String::new(),
+            api_key_env: String::new(),
+            local: false,
+            text_tool_calls: None,
+        };
+        assert!(p.parses_text_tool_calls(), "default must be true");
+        // Explicit false (native-tool providers) is honored.
+        let native = ProviderConfig {
+            text_tool_calls: Some(false),
+            ..p.clone()
+        };
+        assert!(!native.parses_text_tool_calls());
+        // The shipped starter must harden OpenAI/Anthropic (they do native calls)…
+        let cfg: Config = toml::from_str(STARTER_TOML).expect("STARTER_TOML must parse");
+        assert!(!cfg.providers["openai"].parses_text_tool_calls());
+        assert!(!cfg.providers["anthropic"].parses_text_tool_calls());
+        // …while the open-model providers keep text parsing on (so they can act).
+        assert!(cfg.providers["nim"].parses_text_tool_calls());
+        assert!(cfg.providers["openrouter"].parses_text_tool_calls());
+    }
 
     #[test]
     fn starter_toml_parses_into_cascade() {

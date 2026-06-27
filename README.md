@@ -172,10 +172,15 @@ You need **at least one** key (or a local llama.cpp server). All are free to sta
 
 | Provider | Where | Free tier |
 |---|---|---|
-| **OpenRouter** | <https://openrouter.ai/keys> | Many `:free` models (great default). |
-| **NVIDIA NIM** | <https://build.nvidia.com> | Generous free dev tier, no daily wall. |
-| **GitHub Models** | a GitHub PAT | Free chat + embeddings via `models.github.ai`. |
+| **GitHub Models** ⭐ | a GitHub PAT | **Recommended** — free `gpt-4.1-mini` with reliable *native* tool-calling, so the agent loop just works. The shipped default route. |
+| **NVIDIA NIM** | <https://build.nvidia.com> | Generous free dev tier, no daily wall (open models; text-format tool calls). |
+| **OpenRouter** | <https://openrouter.ai/keys> | Many `:free` models. |
 | **OpenAI / Anthropic** | their dashboards | Optional premium routes (`/model openai`, `/model claude`). |
+
+> 💡 **Why GitHub Models is the default:** open models (Qwen, gpt-oss) are great but
+> emit tool calls as *text*, which is less reliable for an agent loop. `gpt-4.1-mini`
+> via GitHub Models is free **and** does proper structured tool-calling — the sweet
+> spot. The others remain as automatic fallbacks.
 
 `mge setup` stores keys in `~/.config/mge/secrets.env` (`chmod 600`, never
 committed) and writes sensible task-tier routes.
@@ -311,12 +316,17 @@ local = true
 # ── Model routes — free-first AUTO-CASCADE ──
 # Each route falls back (rate-limit / 5xx / timeout / unavailable / no-credit)
 # down its chain, ending at `local`. Missing-key routes are skipped automatically.
-[models.main]
+[models.main]                # primary loop — free + reliable NATIVE tool-calling
+provider = "github"
+model = "openai/gpt-4.1-mini"
+fallback = ["main_nim", "main_free", "local"]
+
+[models.main_nim]            # NIM Qwen fallback (capable; text-format tool calls)
 provider = "nim"
 model = "qwen/qwen3.5-122b-a10b"
 fallback = ["main_free", "local"]
 
-[models.main_free]
+[models.main_free]           # OpenRouter free
 provider = "openrouter"
 model = "qwen/qwen3-coder:free"
 fallback = ["local"]
