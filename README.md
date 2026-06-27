@@ -44,10 +44,11 @@ agent-tool footguns.
 - [Installation](#-installation)
 - [Getting a free API key](#-getting-a-free-api-key)
 - [Quick start](#-quick-start)
-- [Usage](#-usage)
-  - [Commands](#commands)
-  - [The TUI](#the-tui)
-  - [Permission modes](#permission-modes)
+- [Using the goat (the TUI)](#-using-the-goat-the-tui)
+  - [What you can ask it to do](#what-you-can-ask-it-to-do)
+  - [Keys](#keys)
+  - [Slash commands](#slash-commands)
+  - [Permission modes](#permission-modes--how-much-to-let-it-do)
 - [Configuration](#-configuration)
 - [Local models (llama.cpp)](#-local-models-llamacpp)
 - [MCP, skills, plugins & the marketplace](#-mcp-skills-plugins--the-marketplace)
@@ -182,77 +183,108 @@ committed) and writes sensible task-tier routes.
 ## 🚀 Quick start
 
 ```bash
-./target/release/mge setup     # paste your free key(s); detects GPU; writes config + routes
-./target/release/mge tui       # launch the animated TUI
+git clone https://github.com/MGE-GOAT/MGE_GOAT.git mge && cd mge && cargo build --release
+./target/release/mge setup     # paste a free key; it detects your GPU and writes routes
+./target/release/mge tui       # launch the goat
 ```
 
-…or jump straight in headless:
+That's the last terminal command you need — **everything else happens by chatting
+inside the TUI.**
 
-```bash
-mge run "explain what src/agent/mod.rs does"          # one-shot, clean stdout
-mge chat                                               # line-mode REPL
-mge goal "make cargo test pass" --until "cargo test"   # autonomous until green
-```
+## 🧭 Using the goat (the TUI)
 
-> 💡 The TUI mascot likes a terminal **~30 rows tall**. `mge chat` is a lighter
-> line-mode REPL with the same agent if your terminal is small.
+Open the TUI and **just say what you want, in plain language.** The agent takes it
+from there — it reads your codebase, writes and edits files, runs commands, looks
+things up, and keeps iterating until the job is done. You're not running commands;
+you're *talking to it*, and you watch the whole thing happen live:
 
-## 🧭 Usage
+- **live diffs** for every file it writes or edits (green added / red removed),
+- an **activity & plan pane** tracking each step as it runs,
+- a **`y / n` prompt** before it runs `bash` or hands work to another agent,
+- **token/cost** in the status line — and the goat licking its melting ice cream while it thinks. 🐐🍦
 
-### Commands
+It works across **many files in a single turn**, runs your **tests/build** as it
+goes, fixes what it broke, and **stops to ask** before anything destructive — so
+it's safe to let it drive.
 
-| Command | What it does |
+### What you can ask it to do
+
+Type any of these straight into the prompt — no flags, no subcommands, just chat:
+
+| You type… | …and the goat |
 |---|---|
-| `mge setup` | Guided first-run: keys → GPU detect → task-tier routes. |
-| `mge init` | Write a starter `config.toml` (no prompts). |
-| `mge tui` | Full-screen animated TUI. |
-| `mge chat [--resume\|--continue\|--fork] [--yolo] [--route <r>]` | Line-mode agentic REPL (resumable). |
-| `mge run "<prompt>" [--json] [--image <f>]` | Headless one-shot for pipes/CI (clean stdout). |
-| `mge plan "<task>"` | Research read-only → draft plan → approve → execute. |
-| `mge goal "…" [--until <cmd>] [--max N]` | Autonomous goal loop until done. |
-| `mge fix "<cmd>" [--max N]` | Iterate until a shell command passes. |
-| `mge rewind [seq] [--force]` | List / restore file-edit checkpoints. |
-| `mge map` | Print the repo map (codebase orientation). |
-| `mge models [query]` | Browse the live model catalog. |
-| `mge sessions` | List saved sessions (resume with `--resume <id>`). |
-| `mge doctor` | Show resolved config, routes, key **presence** (never values). |
-| `mge gpu` | Local GPU / VRAM status used for routing. |
-| `mge mcp [--reapprove <server>]` | Connect to MCP servers and list their tools. |
-| `mge skills` / `mge commands` | List discovered skills / custom slash commands. |
-| `mge market search\|info\|install <q>` | Find & add MCP servers from the registry. |
-| `mge stats` / `mge prune` | Tool-usage stats / never-used MCP tools. |
-| `mge banner` / `mge splash` | Print / animate the goat. |
+| *"add a `/logout` route and a test for it"* | reads the relevant files, writes the code **across multiple files**, adds the test, and runs it |
+| *"make the test suite pass"* | runs your tests, reads the failures, edits, re-runs — **looping until green** |
+| *"why does `parse_config` return None on empty input?"* | greps + reads the code, **traces the logic**, explains the bug, offers a fix |
+| *"refactor the auth module into smaller files"* | plans the split, moves code, fixes imports, keeps it compiling |
+| *"what does this repo do?"* | uses the **repo map + code graph** to summarize the architecture |
+| *"check this file for compiler errors"* | runs your real **language server** (`rust-analyzer`, …) for ground-truth diagnostics |
+| *"look up the current `serde` derive API and use it"* | **searches the web / fetches docs** and folds them into the change |
+| *"plan a migration to async, then do it"* | drafts a **read-only plan**, waits for your approval, then executes |
+| *"keep going until `cargo build` is clean"* | runs an **autonomous loop** until the goal check passes |
+| *"hand this big refactor to Claude"* | **delegates** the subtask to your Codex / Claude Code subscription |
+| *"summarize @src/agent/mod.rs"* | `@path` pulls a file's contents straight into your message |
 
-### The TUI
+Behind those sentences the agent has real tools: read / write / **multi-file
+edit** · glob · grep · tree · find-symbol · code-graph · semantic search · **bash**
+· web fetch & search · LSP diagnostics · subagents · MCP tools. You never invoke
+them — you just describe the outcome.
+
+### Keys
 
 | Key | Action |
 |---|---|
-| `Enter` | Send message |
-| `Esc` / `Ctrl-C` | Quit (Esc twice mid-turn) |
-| `↑` / `↓` / `PgUp` / `PgDn` | Scroll the conversation |
-| `Ctrl-P` / `Ctrl-N` | Recall previous / next input |
-| `Ctrl-U` | Clear the input line |
-| **`Shift+Tab`** | Cycle permission mode (default → accept-edits → plan → yolo) |
-| `@path` | Inject a file's contents into your message |
-| `y` / `n` | Answer a `bash`/`delegate` approval prompt |
+| `Enter` | Send your message |
+| `@path` | Attach a file's contents to the message |
+| `Shift+Tab` | Cycle how much it's allowed to do (see below) |
+| `↑` / `↓` · `PgUp` / `PgDn` | Scroll the conversation |
+| `Ctrl-P` / `Ctrl-N` | Recall your previous / next message |
+| `y` / `n` | Approve / deny a pending `bash` or delegate step |
+| `Ctrl-U` | Clear the input · `Esc` / `Ctrl-C` quit |
 
-**Slash commands:** `/help` · `/clear` · `/context` · `/cost` · `/model <id>` ·
-`/auto` · `/effort <level>` · `/mode <mode>` · `/rewind [seq]` · `/commands` · `/quit`.
+### Slash commands
 
-### Permission modes
+Steer the session mid-chat — type these in the prompt:
 
-Cycle with **Shift+Tab** or set `[permissions].mode`. **`deny` rules always win**,
-even in `yolo`.
-
-| Mode | Behavior |
+| Command | Does |
 |---|---|
-| `default` | Ask before `bash`/`write`/`edit`; allow reads. |
-| `acceptEdits` | Auto-apply edits; **`bash`/`delegate` prompt for `y/n`** in the TUI. |
-| `plan` | **Read-only.** Blocks *all* `bash` and writes (even `bash ls`) — for audits. |
-| `yolo` | Allow everything (`deny` rules still apply). |
+| `/model <id>` | Switch to any route or model on the fly (e.g. a stronger one for a hard task) |
+| `/effort <low\|medium\|high\|xhigh>` | Dial reasoning depth up or down |
+| `/mode <default\|acceptEdits\|plan\|yolo>` | Change how much it can do without asking |
+| `/rewind [seq]` | List file-edit checkpoints, or restore one (undo its edits) |
+| `/cost` · `/context` | Token/cost so far · current context size |
+| `/clear` | Start a fresh conversation |
+| `/commands` · `/help` · `/quit` | Custom macros · help · exit |
 
-Fine-grained rules live under `[permissions]`: `allow` / `ask` / `deny`, with
-`bash:<pattern>` matching for shell commands (e.g. `"bash:rm -rf *"`).
+### Permission modes — how much to let it do
+
+Cycle with **Shift+Tab** (or `/mode`). **`deny` rules always win**, even in `yolo`.
+
+| Mode | What it means while you chat |
+|---|---|
+| `default` | Asks before it runs `bash` or writes/edits a file; reads freely. |
+| `acceptEdits` | Edits apply automatically; it still asks (`y/n`) before `bash` or delegating. |
+| `plan` | **Read-only** — it can look and plan but cannot write or run anything. Great for "audit this" or "tell me how you'd do it first." |
+| `yolo` | Does everything without asking (your `deny` rules still block listed commands). |
+
+<details>
+<summary><b>Prefer the terminal?</b> — headless & scripting entry points (same agent, no TUI)</summary>
+
+The TUI is the main way in, but every capability is also a command for pipes/CI/automation:
+
+| Command | What it does |
+|---|---|
+| `mge run "<prompt>" [--json]` | One-shot, clean stdout (the agent, headless). |
+| `mge chat [--resume\|--continue\|--fork]` | Line-mode REPL with the same agent. |
+| `mge plan "<task>"` | Research read-only → plan → approve → execute. |
+| `mge goal "…" --until "<cmd>"` | Run autonomously until a check passes. |
+| `mge fix "<cmd>"` | Loop edits until a command goes green. |
+| `mge rewind [seq]` | List / restore file-edit checkpoints. |
+| `mge setup` · `mge init` · `mge doctor` · `mge gpu` | First-run setup · write config · show config/routes · GPU status. |
+| `mge models [q]` · `mge map` · `mge sessions` | Browse models · print repo map · list sessions. |
+| `mge mcp` · `mge market <q>` · `mge skills` · `mge commands` | Manage MCP servers, the registry, skills, custom commands. |
+
+</details>
 
 ## ⚙️ Configuration
 
