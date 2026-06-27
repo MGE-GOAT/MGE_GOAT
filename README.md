@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="docs/mascot.png" alt="MGE_GOAT mascot — an evil goat licking a crying, melting ice cream" width="260">
+<img src="docs/mascot.gif" alt="MGE_GOAT mascot — an evil goat licking a crying, melting ice cream" width="320">
 
-<sub>in the TUI this pixel sprite animates in truecolor — blinks, bobs, licks & melts</sub>
+<sub>the actual TUI mascot — an evil goat licking a crying ice cream that blinks, bobs &amp; melts</sub>
 
 # 🐐🍦 MGE_GOAT
 
