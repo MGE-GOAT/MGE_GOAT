@@ -28,11 +28,24 @@ impl OpenAiCompat {
         base_url: impl Into<String>,
         api_key: Option<String>,
     ) -> Self {
+        // A connect timeout (provider unreachable) + a per-read idle timeout (SSE
+        // stream stalls mid-response without closing the socket) — without these
+        // a hung provider freezes the whole agent loop forever. read_timeout is
+        // between-bytes, so it does NOT cut off a long-but-active stream. A timeout
+        // surfaces as a retriable error, so the fallback cascade tries the next model.
+        let http = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .read_timeout(std::time::Duration::from_secs(120))
+            .build()
+            .unwrap_or_else(|e| {
+                eprintln!("[mge] warning: HTTP client build failed ({e}); timeouts inactive");
+                reqwest::Client::new()
+            });
         Self {
             name: name.into(),
             base_url: base_url.into().trim_end_matches('/').to_string(),
             api_key,
-            http: reqwest::Client::new(),
+            http,
             extra_headers: Vec::new(),
         }
     }
@@ -50,13 +63,14 @@ impl OpenAiCompat {
 // ── Wire serialization ───────────────────────────────────────────────────────
 
 #[derive(Serialize)]
-struct WireMessage<'a> {
-    role: &'a str,
-    content: &'a str,
+struct WireMessage {
+    role: &'static str,
+    // String for text turns, or an array of {text}/{image_url} parts for images.
+    content: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_calls: Option<Vec<Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tool_call_id: Option<&'a str>,
+    tool_call_id: Option<String>,
 }
 
 fn role_str(r: Role) -> &'static str {
@@ -68,7 +82,7 @@ fn role_str(r: Role) -> &'static str {
     }
 }
 
-fn message_to_wire(m: &Message) -> WireMessage<'_> {
+fn message_to_wire(m: &Message) -> WireMessage {
     let tool_calls = if m.tool_calls.is_empty() {
         None
     } else {
@@ -85,11 +99,22 @@ fn message_to_wire(m: &Message) -> WireMessage<'_> {
                 .collect(),
         )
     };
+    // Plain text → a string; with media → an array of text + media content parts.
+    let content = if m.media.is_empty() {
+        Value::String(m.content.clone())
+    } else {
+        let mut parts: Vec<Value> = Vec::new();
+        if !m.content.is_empty() {
+            parts.push(json!({ "type": "text", "text": m.content }));
+        }
+        parts.extend(m.media.iter().cloned());
+        Value::Array(parts)
+    };
     WireMessage {
         role: role_str(m.role),
-        content: &m.content,
+        content,
         tool_calls,
-        tool_call_id: m.tool_call_id.as_deref(),
+        tool_call_id: m.tool_call_id.clone(),
     }
 }
 
@@ -120,6 +145,9 @@ fn build_body(req: &ChatRequest) -> Value {
     if let Some(m) = req.max_tokens {
         body["max_tokens"] = json!(m);
     }
+    if let Some(e) = &req.reasoning_effort {
+        body["reasoning_effort"] = json!(e);
+    }
     body
 }
 
@@ -137,6 +165,9 @@ struct ChunkChoice {
 struct Delta {
     #[serde(default)]
     content: Option<String>,
+    // Reasoning/thinking tokens — providers name this field differently.
+    #[serde(default, alias = "reasoning")]
+    reasoning_content: Option<String>,
     #[serde(default)]
     tool_calls: Option<Vec<DeltaToolCall>>,
 }
@@ -167,14 +198,27 @@ struct ChunkResponse {
 
 /// Parse one SSE `data:` payload into zero or more [`StreamEvent`]s.
 fn parse_chunk(data: &str) -> Result<Vec<StreamEvent>> {
+    // Providers sometimes stream an error object instead of a normal chunk
+    // (e.g. mid-stream rate-limit). Surface it instead of silently dropping it.
+    if let Ok(v) = serde_json::from_str::<Value>(data)
+        && let Some(err) = v.get("error")
+    {
+        let msg = err.get("message").and_then(Value::as_str).unwrap_or(data);
+        return Err(anyhow!("provider stream error: {msg}"));
+    }
     let chunk: ChunkResponse =
         serde_json::from_str(data).with_context(|| format!("decoding stream chunk: {data}"))?;
     let mut events = Vec::new();
     for choice in chunk.choices {
-        if let Some(text) = choice.delta.content {
-            if !text.is_empty() {
-                events.push(StreamEvent::TextDelta(text));
-            }
+        if let Some(r) = choice.delta.reasoning_content
+            && !r.is_empty()
+        {
+            events.push(StreamEvent::ReasoningDelta(r));
+        }
+        if let Some(text) = choice.delta.content
+            && !text.is_empty()
+        {
+            events.push(StreamEvent::TextDelta(text));
         }
         if let Some(calls) = choice.delta.tool_calls {
             for c in calls {
@@ -191,7 +235,9 @@ fn parse_chunk(data: &str) -> Result<Vec<StreamEvent>> {
             }
         }
         if let Some(reason) = choice.finish_reason {
-            events.push(StreamEvent::Done { finish_reason: Some(reason) });
+            events.push(StreamEvent::Done {
+                finish_reason: Some(reason),
+            });
         }
     }
     Ok(events)
@@ -245,7 +291,9 @@ impl LlmProvider for OpenAiCompat {
                 Ok(ev) => {
                     let data = ev.data;
                     if data.trim() == "[DONE]" {
-                        vec![Ok(StreamEvent::Done { finish_reason: None })]
+                        vec![Ok(StreamEvent::Done {
+                            finish_reason: None,
+                        })]
                     } else {
                         match parse_chunk(&data) {
                             Ok(evs) => evs.into_iter().map(Ok).collect(),
