@@ -77,8 +77,8 @@ pub fn build(root: &Path, cfg: &RepoMapConfig) -> CodeGraph {
     let walker = WalkDir::new(root).into_iter().filter_entry(|e| {
         let name = e.file_name().to_string_lossy();
         if e.file_type().is_dir() {
-            !crate::repo_map::EXCLUDE_DIRS.contains(&name.as_ref())
-                && !(name.starts_with('.') && name != ".")
+            !(crate::repo_map::EXCLUDE_DIRS.contains(&name.as_ref())
+                || name.starts_with('.') && name != ".")
         } else {
             true
         }

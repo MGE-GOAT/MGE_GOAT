@@ -183,7 +183,7 @@ fn collect_with_freq(root: &Path) -> (Vec<FileSymbols>, HashMap<String, u32>) {
         // Skip excluded directories (and hidden dirs) by name.
         let name = e.file_name().to_string_lossy();
         if e.file_type().is_dir() {
-            !EXCLUDE_DIRS.contains(&name.as_ref()) && !(name.starts_with('.') && name != ".")
+            !(EXCLUDE_DIRS.contains(&name.as_ref()) || name.starts_with('.') && name != ".")
         } else {
             true
         }
