@@ -1374,4 +1374,50 @@ mod tests {
         assert!(app.pending_approval.is_none(), "answer clears the prompt");
         assert_eq!(rx.blocking_recv().ok(), Some(true), "y → approved");
     }
+
+    /// An `edit_file` Diff event renders a real diff in the conversation: the file
+    /// path, the removed line in RED (DEL) and the added line in GREEN (ADD). This
+    /// is the rich rendering the TUI shows — headless `mge run` prints only the
+    /// final answer, so the diff only appears in `mge tui`/`mge chat`.
+    #[test]
+    fn diff_event_renders_red_removed_and_green_added() {
+        let backend = TestBackend::new(110, 32);
+        let mut term = Terminal::new(backend).unwrap();
+        let mut app = App::new(
+            "main → x".to_string(),
+            Config::default(),
+            "main".to_string(),
+            crate::permissions::Mode::AcceptEdits,
+        );
+        // Same event the agent emits after a successful edit_file.
+        app.on_msg(WorkerMsg::Event(AgentEvent::Diff {
+            path: "greet.py".to_string(),
+            old: "OLDLINEremoved".to_string(),
+            new: "NEWLINEadded".to_string(),
+        }));
+        term.draw(|f| ui(f, &mut app)).unwrap();
+        let buf = term.backend().buffer();
+
+        let mut text = String::new();
+        let (mut red_on_removed, mut green_on_added) = (false, false);
+        for y in 0..32u16 {
+            let mut row = String::new();
+            for x in 0..110u16 {
+                row.push_str(buf[(x, y)].symbol());
+            }
+            if row.contains("OLDLINEremoved") {
+                red_on_removed = (0..110u16).any(|x| buf[(x, y)].fg == DEL);
+            }
+            if row.contains("NEWLINEadded") {
+                green_on_added = (0..110u16).any(|x| buf[(x, y)].fg == ADD);
+            }
+            text.push_str(&row);
+            text.push('\n');
+        }
+        assert!(text.contains("greet.py"), "shows the edited path");
+        assert!(text.contains("OLDLINEremoved"), "shows the removed line");
+        assert!(text.contains("NEWLINEadded"), "shows the added line");
+        assert!(red_on_removed, "removed line renders in red (DEL)");
+        assert!(green_on_added, "added line renders in green (ADD)");
+    }
 }
